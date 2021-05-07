@@ -2,7 +2,7 @@
 VERSION = 5
 PATCHLEVEL = 7
 SUBLEVEL = 0
-EXTRAVERSION = vanilla
+EXTRAVERSION = optiOFO
 NAME = Kleptomaniac Octopus
 
 # *DOCUMENTATION*
