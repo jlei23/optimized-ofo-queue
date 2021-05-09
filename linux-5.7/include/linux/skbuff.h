@@ -744,7 +744,9 @@ struct sk_buff {
 	 * first. This is owned by whoever has the skb queued ATM.
 	 */
 	char			cb[48] __aligned(8);
-
+//optiofo
+        __u16                   batch_num;
+//end
 	union {
 		struct {
 			unsigned long	_skb_refdst;

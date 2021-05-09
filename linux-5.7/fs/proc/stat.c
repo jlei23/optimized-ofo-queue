@@ -21,6 +21,12 @@
 #define arch_irq_stat() 0
 #endif
 
+//optiofo
+extern int NR_GROSPLIT_CPUS;
+extern int GROSPLIT_CPUS[40];
+extern int GROSPLIT_BATCH_SIZE;
+//end
+
 #ifdef arch_idle_time
 
 static u64 get_idle_time(struct kernel_cpustat *kcs, int cpu)
@@ -231,9 +237,113 @@ static const struct proc_ops stat_proc_ops = {
 	.proc_release	= single_release,
 };
 
+//optiofo
+static int grosplit_cpus_show(struct seq_file *f, void *v)
+{
+        u64 grosplit_cpu_map = 0;
+        int i;
+
+        for (i = 0; i < NR_GROSPLIT_CPUS; i++) {
+                grosplit_cpu_map |= (1ull << GROSPLIT_CPUS[i]);
+        }
+        seq_printf(f, "%llx\n", grosplit_cpu_map);
+        return 0;
+}
+
+static int grosplit_cpus_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, grosplit_cpus_show, NULL);
+}
+
+static ssize_t grosplit_cpus_write(struct file *file, const char __user *ubuf,
+                                 size_t size, loff_t *pos)
+{
+        char buf[101];
+        int len, i;
+        u64 grosplit_cpu_map;
+
+        //copy user's input to kernel buffer
+        if (*pos > 0 || size > 100)
+                return -EFAULT;
+        if (copy_from_user(buf, ubuf, size))
+                return -EFAULT;
+
+        //read the cpu map
+        if (sscanf(buf, "%llx", &grosplit_cpu_map) != 1)
+                return -EFAULT;
+
+        len = strlen(buf);
+        *pos = len;
+
+        // fill the GROSPLIT_CPUS array
+        NR_GROSPLIT_CPUS = 0;
+        for_each_online_cpu(i) {
+                if (grosplit_cpu_map & 1) {
+                        GROSPLIT_CPUS[NR_GROSPLIT_CPUS] = i;
+                        NR_GROSPLIT_CPUS++;
+                }
+                grosplit_cpu_map >>= 1;
+        }
+
+        return len;
+}
+
+static const struct proc_ops grosplit_cpus_ops = {
+        .proc_open              = grosplit_cpus_open,
+        .proc_read              = seq_read,
+        .proc_write             = grosplit_cpus_write,
+        .proc_lseek             = seq_lseek,
+        .proc_release           = single_release,
+};
+
+static int grosplit_batch_size_show(struct seq_file *f, void *v)
+{
+        seq_printf(f, "%d\n", GROSPLIT_BATCH_SIZE);
+        return 0;
+}
+
+static int grosplit_batch_size_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, grosplit_batch_size_show, NULL);
+}
+
+static ssize_t grosplit_batch_size_write(struct file *file, const char __user *ubuf,
+                               size_t size, loff_t *pos)
+{
+        char buf[101];
+        int len, batch;
+
+
+        if (*pos > 0 || size > 100)
+                return -EFAULT;
+        if (copy_from_user(buf, ubuf, size))
+                return -EFAULT;
+        if (sscanf(buf, "%d", &batch) != 1)
+                return -EFAULT;
+
+        GROSPLIT_BATCH_SIZE = batch;
+
+        len = strlen(buf);
+        *pos = len;
+        return len;
+}
+
+static const struct proc_ops grosplit_batch_size_ops = {
+        .proc_open              = grosplit_batch_size_open,
+        .proc_read              = seq_read,
+        .proc_write             = grosplit_batch_size_write,
+        .proc_lseek             = seq_lseek,
+        .proc_release           = single_release,
+};
+//end
+
 static int __init proc_stat_init(void)
 {
 	proc_create("stat", 0, NULL, &stat_proc_ops);
+//optiofo
+        proc_create("grosplit_cpus", 0666, NULL, &grosplit_cpus_ops);
+        proc_create("grosplit_batch_size", 0666, NULL, &grosplit_batch_size_ops);
+//end
 	return 0;
 }
 fs_initcall(proc_stat_init);

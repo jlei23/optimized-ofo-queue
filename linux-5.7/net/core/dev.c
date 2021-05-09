@@ -150,6 +150,17 @@
 /* This should be increased if a protocol with a bigger head is added. */
 #define GRO_MAX_HEAD (MAX_HEADER + 128)
 
+//optiofo
+int NR_GROSPLIT_CPUS = 0;       // disable GROSPLIT by default
+EXPORT_SYMBOL(NR_GROSPLIT_CPUS);
+
+int GROSPLIT_CPUS[40] = {0};
+EXPORT_SYMBOL(GROSPLIT_CPUS);
+
+int GROSPLIT_BATCH_SIZE = 100;      // threshold to split stages
+EXPORT_SYMBOL(GROSPLIT_BATCH_SIZE);
+//end
+
 static DEFINE_SPINLOCK(ptype_lock);
 static DEFINE_SPINLOCK(offload_lock);
 struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
@@ -4672,13 +4683,45 @@ out_redir:
 }
 EXPORT_SYMBOL_GPL(do_xdp_generic);
 
+//optiofo
+int cpu_num = 0;
+int pkt_num = 0;
+//end
+
 static int netif_rx_internal(struct sk_buff *skb)
 {
 	int ret;
+//optiofo
+        unsigned int qtail_1= 0;  //lei
+//end
 
 	net_timestamp_check(netdev_tstamp_prequeue, skb);
 
 	trace_netif_rx(skb);
+
+//optiofo
+        if (NR_GROSPLIT_CPUS > 0) {
+                preempt_disable();
+                rcu_read_lock();
+
+                pkt_num++;
+                skb->batch_num = 0;
+                if(pkt_num <= GROSPLIT_BATCH_SIZE){
+                        cpu_num = 4;
+                        skb->batch_num = 1;
+                }else if(pkt_num > GROSPLIT_BATCH_SIZE && pkt_num <= (2*GROSPLIT_BATCH_SIZE)){
+                        cpu_num = 6;
+                        skb->batch_num = 2;
+                }else{
+                        pkt_num = 0;
+                }
+                ret = enqueue_to_backlog(skb, cpu_num, &qtail_1);
+
+                rcu_read_unlock();
+                preempt_enable();
+                return ret;
+        }
+//end
 
 #ifdef CONFIG_RPS
 	if (static_branch_unlikely(&rps_needed)) {
@@ -6140,13 +6183,18 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
-			rcu_read_lock();
-			__netif_receive_skb(skb);
-			rcu_read_unlock();
-			input_queue_head_incr(sd);
-			if (++work >= quota)
-				return work;
-
+//optiofo
+                        if(NR_GROSPLIT_CPUS > 0){
+                                napi_gro_receive(napi, skb);
+                        }else{
+//end
+				rcu_read_lock();
+				__netif_receive_skb(skb);
+				rcu_read_unlock();
+				input_queue_head_incr(sd);
+				if (++work >= quota)
+					return work;
+			}
 		}
 
 		local_irq_disable();
@@ -6619,6 +6667,12 @@ static int napi_poll(struct napi_struct *n, struct list_head *repoll)
 	list_add_tail(&n->poll_list, repoll);
 
 out_unlock:
+//optiofo
+        if(n->gro_bitmask){
+                napi_gro_flush(n, HZ >= 1000);
+        }
+        gro_normal_list(n);
+//end
 	netpoll_poll_unlock(have);
 
 	return work;
@@ -10545,8 +10599,17 @@ static int __init net_dev_init(void)
 #endif
 
 		init_gro_hash(&sd->backlog);
+//optiofo
+                INIT_LIST_HEAD(&sd->backlog.rx_list);//lei
+                INIT_LIST_HEAD(&sd->backlog.poll_list);//lei
+                hrtimer_init(&sd->backlog.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);//lei
+                sd->backlog.timer.function = napi_watchdog;//lei
+                sd->backlog.skb = NULL;//lei
+                sd->backlog.rx_count = 0;//lei
+//end
 		sd->backlog.poll = process_backlog;
 		sd->backlog.weight = weight_p;
+                napi_hash_add(&sd->backlog);//lei
 	}
 
 	dev_boot_phase = 0;

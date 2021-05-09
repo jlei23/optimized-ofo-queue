@@ -50,6 +50,10 @@
 #include "en/xsk/rx.h"
 #include "en/health.h"
 
+//optiofo
+extern int NR_GROSPLIT_CPUS;
+//end
+
 static inline bool mlx5e_rx_hw_stamp(struct hwtstamp_config *config)
 {
 	return config->rx_filter == HWTSTAMP_FILTER_ALL;
@@ -1435,8 +1439,14 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		goto mpwrq_cqe_out;
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
-	napi_gro_receive(rq->cq.napi, skb);
-
+//optiofo
+//	napi_gro_receive(rq->cq.napi, skb);
+        if(NR_GROSPLIT_CPUS > 0){
+                netif_rx(skb);
+        }else{
+                napi_gro_receive(rq->cq.napi, skb);
+        }
+//end
 mpwrq_cqe_out:
 	if (likely(wi->consumed_strides < rq->mpwqe.num_strides))
 		return;
