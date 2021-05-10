@@ -113,6 +113,10 @@ int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 #define REXMIT_LOST	1 /* retransmit packets marked lost */
 #define REXMIT_NEW	2 /* FRTO-style transmit of unsent/new packets */
 
+//optiofo
+extern int NR_GROSPLIT_CPUS;
+//end
+
 #if IS_ENABLED(CONFIG_TLS_DEVICE)
 static DEFINE_STATIC_KEY_DEFERRED_FALSE(clean_acked_data_enabled, HZ);
 
@@ -4201,6 +4205,9 @@ void tcp_fin(struct sock *sk)
 	 * Probably, we should reset in this case. For now drop them.
 	 */
 	skb_rbtree_purge(&tp->out_of_order_queue);
+//optiofo
+        skb_rbtree_purge(&tp->out_of_order_queue_split);
+//end
 	if (tcp_is_sack(tp))
 		tcp_sack_reset(&tp->rx_opt);
 	sk_mem_reclaim(sk);
@@ -4376,10 +4383,27 @@ static void tcp_sack_remove(struct tcp_sock *tp)
 	int this_sack;
 
 	/* Empty ofo queue, hence, all the SACKs are eaten. Clear. */
+//optiofo
+/*
 	if (RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 		tp->rx_opt.num_sacks = 0;
-		return;
+                return;
 	}
+*/
+
+	if(NR_GROSPLIT_CPUS > 0){
+		if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))) {
+			tp->rx_opt.num_sacks = 0;
+			return;
+		}
+	}else{
+                if (RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                        tp->rx_opt.num_sacks = 0;
+                        return;
+                }
+	}
+
+//end
 
 	for (this_sack = 0; this_sack < num_sacks;) {
 		/* Check if the start of the sack is covered by RCV.NXT. */
@@ -4527,6 +4551,54 @@ static void tcp_ofo_queue(struct sock *sk)
 		}
 	}
 }
+
+//optiofo
+
+static void tcp_ofo_queue_split(struct sock *sk)
+{
+        struct tcp_sock *tp = tcp_sk(sk);
+        __u32 dsack_high = tp->rcv_nxt;
+        bool fin, fragstolen, eaten;
+        struct sk_buff *skb, *tail;
+        struct rb_node *p;
+
+        p = rb_first(&tp->out_of_order_queue_split);
+        while (p) {
+                skb = rb_to_skb(p);
+                if (after(TCP_SKB_CB(skb)->seq, tp->rcv_nxt))
+                        break;
+
+                if (before(TCP_SKB_CB(skb)->seq, dsack_high)) {
+                        __u32 dsack = dsack_high;
+                        if (before(TCP_SKB_CB(skb)->end_seq, dsack_high))
+                                dsack_high = TCP_SKB_CB(skb)->end_seq;
+                        tcp_dsack_extend(sk, TCP_SKB_CB(skb)->seq, dsack);
+                }
+                p = rb_next(p);
+                rb_erase(&skb->rbnode, &tp->out_of_order_queue_split);
+
+                if (unlikely(!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt))) {
+                        tcp_drop(sk, skb);
+                        continue;
+                }
+
+                tail = skb_peek_tail(&sk->sk_receive_queue);
+                eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
+                tcp_rcv_nxt_update(tp, TCP_SKB_CB(skb)->end_seq);
+                fin = TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN;
+                if (!eaten)
+                        __skb_queue_tail(&sk->sk_receive_queue, skb);
+                else
+                        kfree_skb_partial(skb, fragstolen);
+
+                if (unlikely(fin)) {
+                        tcp_fin(sk);
+                        break;
+                }
+        }
+}
+
+//end
 
 static bool tcp_prune_ofo_queue(struct sock *sk);
 static int tcp_prune_queue(struct sock *sk);
@@ -4683,6 +4755,130 @@ end:
 	}
 }
 
+//optiofo
+
+static void tcp_data_queue_ofo_split(struct sock *sk, struct sk_buff *skb)
+{
+        struct tcp_sock *tp = tcp_sk(sk);
+        struct rb_node **p, *parent;
+        struct sk_buff *skb1;
+        u32 seq, end_seq;
+        bool fragstolen;
+
+        tcp_ecn_check_ce(sk, skb);
+
+        if (unlikely(tcp_try_rmem_schedule(sk, skb, skb->truesize))) {
+                NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPOFODROP);
+                tcp_drop(sk, skb);
+                return;
+        }
+
+        tp->pred_flags = 0;
+        inet_csk_schedule_ack(sk);
+
+        tp->rcv_ooopack += max_t(u16, 1, skb_shinfo(skb)->gso_segs);
+        NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPOFOQUEUE);
+        seq = TCP_SKB_CB(skb)->seq;
+        end_seq = TCP_SKB_CB(skb)->end_seq;
+
+        p = &tp->out_of_order_queue_split.rb_node;
+        if (RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                if (tcp_is_sack(tp)) {
+                        tp->rx_opt.num_sacks = 1;
+                        tp->selective_acks[0].start_seq = seq;
+                        tp->selective_acks[0].end_seq = end_seq;
+                }
+                rb_link_node(&skb->rbnode, NULL, p);
+                rb_insert_color(&skb->rbnode, &tp->out_of_order_queue_split);
+                tp->ooo_last_skb_split = skb;
+                goto end;
+        }
+
+        if (tcp_ooo_try_coalesce(sk, tp->ooo_last_skb_split,
+                                 skb, &fragstolen)) {
+coalesce_done:
+                tcp_grow_window(sk, skb);
+                kfree_skb_partial(skb, fragstolen);
+                skb = NULL;
+                goto add_sack;
+        }
+        if (!before(seq, TCP_SKB_CB(tp->ooo_last_skb_split)->end_seq)) {
+                parent = &tp->ooo_last_skb_split->rbnode;
+                p = &parent->rb_right;
+                goto insert;
+        }
+
+        parent = NULL;
+        while (*p) {
+                parent = *p;
+                skb1 = rb_to_skb(parent);
+                if (before(seq, TCP_SKB_CB(skb1)->seq)) {
+                        p = &parent->rb_left;
+                        continue;
+                }
+                if (before(seq, TCP_SKB_CB(skb1)->end_seq)) {
+                        if (!after(end_seq, TCP_SKB_CB(skb1)->end_seq)) {
+                                NET_INC_STATS(sock_net(sk),
+                                              LINUX_MIB_TCPOFOMERGE);
+                                tcp_drop(sk, skb);
+                                skb = NULL;
+                                tcp_dsack_set(sk, seq, end_seq);
+                                goto add_sack;
+                        }
+                        if (after(seq, TCP_SKB_CB(skb1)->seq)) {
+                                tcp_dsack_set(sk, seq, TCP_SKB_CB(skb1)->end_seq);
+                        } else {
+                                rb_replace_node(&skb1->rbnode, &skb->rbnode,
+                                                &tp->out_of_order_queue_split);
+                                tcp_dsack_extend(sk,
+                                                 TCP_SKB_CB(skb1)->seq,
+                                                 TCP_SKB_CB(skb1)->end_seq);
+                                NET_INC_STATS(sock_net(sk),
+                                              LINUX_MIB_TCPOFOMERGE);
+                                tcp_drop(sk, skb1);
+                                goto merge_right;
+                        }
+                } else if (tcp_ooo_try_coalesce(sk, skb1,
+                                                skb, &fragstolen)) {
+                        goto coalesce_done;
+                }
+                p = &parent->rb_right;
+        }
+insert:
+        rb_link_node(&skb->rbnode, parent, p);
+        rb_insert_color(&skb->rbnode, &tp->out_of_order_queue_split);
+
+merge_right:
+        while ((skb1 = skb_rb_next(skb)) != NULL) {
+                if (!after(end_seq, TCP_SKB_CB(skb1)->seq))
+                        break;
+                if (before(end_seq, TCP_SKB_CB(skb1)->end_seq)) {
+                        tcp_dsack_extend(sk, TCP_SKB_CB(skb1)->seq,
+                                         end_seq);
+                        break;
+                }
+                rb_erase(&skb1->rbnode, &tp->out_of_order_queue_split);
+                tcp_dsack_extend(sk, TCP_SKB_CB(skb1)->seq,
+                                 TCP_SKB_CB(skb1)->end_seq);
+                NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPOFOMERGE);
+                tcp_drop(sk, skb1);
+        }
+        if (!skb1)
+                tp->ooo_last_skb_split = skb;
+
+add_sack:
+        if (tcp_is_sack(tp))
+                tcp_sack_new_ofo_skb(sk, seq, end_seq);
+end:
+        if (skb) {
+                tcp_grow_window(sk, skb);
+                skb_condense(skb);
+                skb_set_owner_r(skb, sk);
+        }
+}
+
+//end
+
 static int __must_check tcp_queue_rcv(struct sock *sk, struct sk_buff *skb,
 				      bool *fragstolen)
 {
@@ -4808,17 +5004,36 @@ queue_and_out:
 			tcp_event_data_recv(sk, skb);
 		if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
 			tcp_fin(sk);
-
+//optiofo
+/*
 		if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 			tcp_ofo_queue(sk);
 
-			/* RFC5681. 4.2. SHOULD send immediate ACK, when
-			 * gap in queue is filled.
-			 */
-			if (RB_EMPTY_ROOT(&tp->out_of_order_queue))
+                        if (RB_EMPTY_ROOT(&tp->out_of_order_queue))
 				inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 		}
+*/
 
+		if(NR_GROSPLIT_CPUS > 0){
+                	if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                        	tcp_ofo_queue(sk);
+                	}
+                	if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                        	tcp_ofo_queue_split(sk);
+                	}
+                	if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+                        	inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                	}
+		}else{
+			if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+				tcp_ofo_queue(sk);
+
+				if (RB_EMPTY_ROOT(&tp->out_of_order_queue))
+					inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+			}
+		}
+
+//end
 		if (tp->rx_opt.num_sacks)
 			tcp_sack_remove(tp);
 
@@ -4862,8 +5077,20 @@ drop:
 		}
 		goto queue_and_out;
 	}
+//optiofo
+//	tcp_data_queue_ofo(sk, skb);
 
-	tcp_data_queue_ofo(sk, skb);
+	if(NR_GROSPLIT_CPUS > 0){
+        	if(skb->batch_num == 1){
+                	tcp_data_queue_ofo(sk, skb);
+        	}else if(skb->batch_num == 2){
+                	tcp_data_queue_ofo_split(sk, skb);
+        	}
+	}else{
+		tcp_data_queue_ofo(sk, skb);
+	}
+
+//end
 }
 
 static struct sk_buff *tcp_skb_next(struct sk_buff *skb, struct sk_buff_head *list)
@@ -5260,12 +5487,27 @@ send_now:
 		tcp_send_ack(sk);
 		return;
 	}
-
+//optiofo
+/*
 	if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 		tcp_send_delayed_ack(sk);
-		return;
+                return;
+	}
+*/
+
+	if(NR_GROSPLIT_CPUS > 0){
+		if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue) || RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+			tcp_send_delayed_ack(sk);
+			return;
+		}
+	}else{
+                if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                        tcp_send_delayed_ack(sk);
+                        return;
+                }
 	}
 
+//end
 	if (!tcp_is_sack(tp) ||
 	    tp->compressed_ack >= sock_net(sk)->ipv4.sysctl_tcp_comp_sack_nr)
 		goto send_now;

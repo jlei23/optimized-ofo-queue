@@ -310,7 +310,10 @@ struct tcp_sock {
 	/* OOO segments go in this rbtree. Socket lock must be held. */
 	struct rb_root	out_of_order_queue;
 	struct sk_buff	*ooo_last_skb; /* cache rb_last(out_of_order_queue) */
-
+//optiofo
+        struct rb_root  out_of_order_queue_split;
+        struct sk_buff  *ooo_last_skb_split; /* cache rb_last(out_of_order_queue) */
+//end
 	/* SACKs data, these 2 need to be together (see tcp_options_write) */
 	struct tcp_sack_block duplicate_sack[1]; /* D-SACK block */
 	struct tcp_sack_block selective_acks[4]; /* The SACKS themselves*/
