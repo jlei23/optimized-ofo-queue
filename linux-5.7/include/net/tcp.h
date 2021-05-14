@@ -51,6 +51,10 @@ extern struct inet_hashinfo tcp_hashinfo;
 extern struct percpu_counter tcp_orphan_count;
 void tcp_time_wait(struct sock *sk, int state, int timeo);
 
+//optiofo
+extern int NR_GROSPLIT_CPUS;
+//end
+
 #define MAX_TCP_HEADER	L1_CACHE_ALIGN(128 + MAX_HEADER)
 #define MAX_TCP_OPTION_SPACE 40
 #define TCP_MIN_SND_MSS		48
@@ -688,12 +692,30 @@ static inline void tcp_fast_path_on(struct tcp_sock *tp)
 static inline void tcp_fast_path_check(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
+//optiofo
+/*
 	if (RB_EMPTY_ROOT(&tp->out_of_order_queue) &&
 	    tp->rcv_wnd &&
 	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
 	    !tp->urg_data)
 		tcp_fast_path_on(tp);
+*/
+	if(NR_GROSPLIT_CPUS > 0){
+                if (RB_EMPTY_ROOT(&tp->out_of_order_queue) && RB_EMPTY_ROOT(&tp->out_of_order_queue_split) &&
+                    tp->rcv_wnd &&
+                    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
+                    !tp->urg_data){
+                        tcp_fast_path_on(tp);
+		}
+	}else{
+	        if (RB_EMPTY_ROOT(&tp->out_of_order_queue) &&
+	            tp->rcv_wnd &&
+	            atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
+	            !tp->urg_data){
+	                tcp_fast_path_on(tp);
+		}
+	}
+//end
 }
 
 /* Compute the actual rto_min value */

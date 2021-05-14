@@ -10,6 +10,10 @@
 #include <net/inetpeer.h>
 #include <net/tcp.h>
 
+//optiofo
+extern int NR_GROSPLIT_CPUS;
+//end
+
 void tcp_fastopen_init_key_once(struct net *net)
 {
 	u8 key[TCP_FASTOPEN_KEY_LENGTH];
@@ -526,6 +530,59 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct dst_entry *dst;
+//optiofo
+/*
+        struct sk_buff *skb;
+
+        if (!tp->syn_fastopen)
+                return;
+
+        if (!tp->data_segs_in) {
+                skb = skb_rb_first(&tp->out_of_order_queue);
+                if (skb && !skb_rb_next(skb)) {
+                        if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) {
+                                tcp_fastopen_active_disable(sk);
+                                return;
+                        }
+                }
+        } else if (tp->syn_fastopen_ch &&
+                   atomic_read(&sock_net(sk)->ipv4.tfo_active_disable_times)) {
+                dst = sk_dst_get(sk);
+                if (!(dst && dst->dev && (dst->dev->flags & IFF_LOOPBACK)))
+                        atomic_set(&sock_net(sk)->ipv4.tfo_active_disable_times, 0);
+                dst_release(dst);
+        }
+*/
+	if(NR_GROSPLIT_CPUS > 0){
+        struct sk_buff *skb1;
+        struct sk_buff *skb2;
+
+        if (!tp->syn_fastopen)
+                return;
+
+        if (!tp->data_segs_in) {
+                skb1 = skb_rb_first(&tp->out_of_order_queue);
+                skb2 = skb_rb_first(&tp->out_of_order_queue_split);
+                if (skb1 && !skb_rb_next(skb1) && !skb2) {
+                        if (TCP_SKB_CB(skb1)->tcp_flags & TCPHDR_FIN) {
+                                tcp_fastopen_active_disable(sk);
+                                return;
+                        }
+                }
+                if (skb2 && !skb_rb_next(skb2) && !skb1) {
+                        if (TCP_SKB_CB(skb2)->tcp_flags & TCPHDR_FIN) {
+                                tcp_fastopen_active_disable(sk);
+                                return;
+                        }
+                }
+        } else if (tp->syn_fastopen_ch &&
+                   atomic_read(&sock_net(sk)->ipv4.tfo_active_disable_times)) {
+                dst = sk_dst_get(sk);
+                if (!(dst && dst->dev && (dst->dev->flags & IFF_LOOPBACK)))
+                        atomic_set(&sock_net(sk)->ipv4.tfo_active_disable_times, 0);
+                dst_release(dst);
+        }
+	}else{
 	struct sk_buff *skb;
 
 	if (!tp->syn_fastopen)
@@ -546,6 +603,8 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 			atomic_set(&sock_net(sk)->ipv4.tfo_active_disable_times, 0);
 		dst_release(dst);
 	}
+	}
+//end
 }
 
 void tcp_fastopen_active_detect_blackhole(struct sock *sk, bool expired)

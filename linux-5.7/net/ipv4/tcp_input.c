@@ -4601,6 +4601,9 @@ static void tcp_ofo_queue_split(struct sock *sk)
 //end
 
 static bool tcp_prune_ofo_queue(struct sock *sk);
+//optiofo
+static bool tcp_prune_ofo_queue_split(struct sock *sk);
+//endd
 static int tcp_prune_queue(struct sock *sk);
 
 static int tcp_try_rmem_schedule(struct sock *sk, struct sk_buff *skb,
@@ -4613,8 +4616,21 @@ static int tcp_try_rmem_schedule(struct sock *sk, struct sk_buff *skb,
 			return -1;
 
 		while (!sk_rmem_schedule(sk, skb, size)) {
+//optiofo
+/*
 			if (!tcp_prune_ofo_queue(sk))
 				return -1;
+*/
+			if(NR_GROSPLIT_CPUS > 0){
+                        	if ((!tcp_prune_ofo_queue(sk)) && (!tcp_prune_ofo_queue_split(sk))){
+                                	return -1;
+				}
+			}else{
+	                        if (!tcp_prune_ofo_queue(sk)){
+	                                return -1;
+				}
+			}
+//end
 		}
 	}
 	return 0;
@@ -5248,6 +5264,55 @@ end:
 		tcp_rbtree_insert(root, skb);
 }
 
+//optiofo
+static void tcp_collapse_ofo_queue_split(struct sock *sk)
+{
+        struct tcp_sock *tp = tcp_sk(sk);
+        u32 range_truesize, sum_tiny = 0;
+        struct sk_buff *skb, *head;
+        u32 start, end;
+
+        skb = skb_rb_first(&tp->out_of_order_queue_split);
+new_range:
+        if (!skb) {
+                tp->ooo_last_skb_split = skb_rb_last(&tp->out_of_order_queue_split);
+                return;
+        }
+        start = TCP_SKB_CB(skb)->seq;
+        end = TCP_SKB_CB(skb)->end_seq;
+        range_truesize = skb->truesize;
+
+        for (head = skb;;) {
+                skb = skb_rb_next(skb);
+
+                /* Range is terminated when we see a gap or when
+                 * we are at the queue end.
+                 */
+                if (!skb ||
+                    after(TCP_SKB_CB(skb)->seq, end) ||
+                    before(TCP_SKB_CB(skb)->end_seq, start)) {
+                        /* Do not attempt collapsing tiny skbs */
+                        if (range_truesize != head->truesize ||
+                            end - start >= SKB_WITH_OVERHEAD(SK_MEM_QUANTUM)) {
+                                tcp_collapse(sk, NULL, &tp->out_of_order_queue_split,
+                                             head, skb, start, end);
+                        } else {
+                                sum_tiny += range_truesize;
+                                if (sum_tiny > sk->sk_rcvbuf >> 3)
+                                        return;
+                        }
+                        goto new_range;
+                }
+
+                range_truesize += skb->truesize;
+                if (unlikely(before(TCP_SKB_CB(skb)->seq, start)))
+                        start = TCP_SKB_CB(skb)->seq;
+                if (after(TCP_SKB_CB(skb)->end_seq, end))
+                        end = TCP_SKB_CB(skb)->end_seq;
+        }
+}
+//end
+
 /* Collapse ofo queue. Algorithm: select contiguous sequence of skbs
  * and tcp_collapse() them until all the queue is collapsed.
  */
@@ -5297,6 +5362,46 @@ new_range:
 			end = TCP_SKB_CB(skb)->end_seq;
 	}
 }
+
+//optiofo
+static bool tcp_prune_ofo_queue_split(struct sock *sk)
+{
+        struct tcp_sock *tp = tcp_sk(sk);
+        struct rb_node *node, *prev;
+        int goal;
+
+        if (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))
+                return false;
+
+        NET_INC_STATS(sock_net(sk), LINUX_MIB_OFOPRUNED);
+        goal = sk->sk_rcvbuf >> 3;
+        node = &tp->ooo_last_skb_split->rbnode;
+        do {
+                prev = rb_prev(node);
+                rb_erase(node, &tp->out_of_order_queue_split);
+                goal -= rb_to_skb(node)->truesize;
+                tcp_drop(sk, rb_to_skb(node));
+                if (!prev || goal <= 0) {
+                        sk_mem_reclaim(sk);
+                        if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf &&
+                            !tcp_under_memory_pressure(sk))
+                                break;
+                        goal = sk->sk_rcvbuf >> 3;
+                }
+                node = prev;
+        } while (node);
+        tp->ooo_last_skb_split = rb_to_skb(prev);
+
+        /* Reset SACK state.  A conforming SACK implementation will
+         * do the same at a timeout based retransmit.  When a connection
+         * is in a sad state like this, we care only about integrity
+         * of the connection not performance.
+         */
+        if (tp->rx_opt.sack_ok)
+                tcp_sack_reset(&tp->rx_opt);
+        return true;
+}
+//end
 
 /*
  * Clean the out-of-order queue to make room.
@@ -5369,6 +5474,12 @@ static int tcp_prune_queue(struct sock *sk)
 		return 0;
 
 	tcp_collapse_ofo_queue(sk);
+//optiofo
+	if(NR_GROSPLIT_CPUS > 0){
+		tcp_collapse_ofo_queue_split(sk);
+	}
+//end
+
 	if (!skb_queue_empty(&sk->sk_receive_queue))
 		tcp_collapse(sk, &sk->sk_receive_queue, NULL,
 			     skb_peek(&sk->sk_receive_queue),
@@ -5383,7 +5494,11 @@ static int tcp_prune_queue(struct sock *sk)
 	 * This must not ever occur. */
 
 	tcp_prune_ofo_queue(sk);
-
+//optiofo
+	if(NR_GROSPLIT_CPUS > 0){
+		tcp_prune_ofo_queue_split(sk);
+	}
+//end
 	if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf)
 		return 0;
 
@@ -5496,7 +5611,7 @@ send_now:
 */
 
 	if(NR_GROSPLIT_CPUS > 0){
-		if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue) || RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+		if (!ofo_possible || (RB_EMPTY_ROOT(&tp->out_of_order_queue) && RB_EMPTY_ROOT(&tp->out_of_order_queue_split))) {
 			tcp_send_delayed_ack(sk);
 			return;
 		}
