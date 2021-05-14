@@ -4505,13 +4505,20 @@ static void tcp_drop(struct sock *sk, struct sk_buff *skb)
 /* This one checks to see if we can put data from the
  * out_of_order queue into the receive_queue.
  */
-static void tcp_ofo_queue(struct sock *sk)
+//optiofo
+//static void tcp_ofo_queue(struct sock *sk)
+static int tcp_ofo_queue(struct sock *sk)
+//end
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	__u32 dsack_high = tp->rcv_nxt;
 	bool fin, fragstolen, eaten;
 	struct sk_buff *skb, *tail;
 	struct rb_node *p;
+
+//optiofo
+	int ret = 0;
+//end
 
 	p = rb_first(&tp->out_of_order_queue);
 	while (p) {
@@ -4532,7 +4539,9 @@ static void tcp_ofo_queue(struct sock *sk)
 			tcp_drop(sk, skb);
 			continue;
 		}
-
+//optiofo
+		ret = 1;
+//end
 		tail = skb_peek_tail(&sk->sk_receive_queue);
 		eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
 		tcp_rcv_nxt_update(tp, TCP_SKB_CB(skb)->end_seq);
@@ -4550,17 +4559,25 @@ static void tcp_ofo_queue(struct sock *sk)
 			break;
 		}
 	}
+//optiofo
+	return ret;
+//end
 }
 
 //optiofo
 
-static void tcp_ofo_queue_split(struct sock *sk)
+//static void tcp_ofo_queue_split(struct sock *sk)
+static int tcp_ofo_queue_split(struct sock *sk)
 {
         struct tcp_sock *tp = tcp_sk(sk);
         __u32 dsack_high = tp->rcv_nxt;
         bool fin, fragstolen, eaten;
         struct sk_buff *skb, *tail;
         struct rb_node *p;
+
+//optiofo
+	int ret = 0;
+//end
 
         p = rb_first(&tp->out_of_order_queue_split);
         while (p) {
@@ -4581,7 +4598,9 @@ static void tcp_ofo_queue_split(struct sock *sk)
                         tcp_drop(sk, skb);
                         continue;
                 }
-
+//optiofo
+		ret = 1;
+//end
                 tail = skb_peek_tail(&sk->sk_receive_queue);
                 eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
                 tcp_rcv_nxt_update(tp, TCP_SKB_CB(skb)->end_seq);
@@ -4596,6 +4615,9 @@ static void tcp_ofo_queue_split(struct sock *sk)
                         break;
                 }
         }
+//optiofo
+	return ret;
+//end
 }
 
 //end
@@ -4981,6 +5003,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	struct tcp_sock *tp = tcp_sk(sk);
 	bool fragstolen;
 	int eaten;
+	int q1, q2;
 
 	if (sk_is_mptcp(sk))
 		mptcp_incoming_options(sk, skb, &tp->rx_opt);
@@ -5029,17 +5052,25 @@ queue_and_out:
 				inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 		}
 */
-
 		if(NR_GROSPLIT_CPUS > 0){
-                	if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
-                        	tcp_ofo_queue(sk);
-                	}
-                	if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
-                        	tcp_ofo_queue_split(sk);
-                	}
-                	if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
-                        	inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
-                	}
+			while(1){
+				q1 = 0;
+				q2 = 0;
+            		    	if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+            		            	q1 = tcp_ofo_queue(sk);
+                		}
+                		if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                	        	q2 = tcp_ofo_queue_split(sk);
+                		}
+				if(q1 || q2){
+					continue;
+				}else{
+					break;
+				}
+			}
+                		if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+                	        	inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                		}
 		}else{
 			if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 				tcp_ofo_queue(sk);
