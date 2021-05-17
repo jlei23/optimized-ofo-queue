@@ -4375,13 +4375,13 @@ new_sack:
 }
 
 /* RCV.NXT advances, some SACKs should be eaten. */
-
+/*
 static void tcp_sack_remove(struct tcp_sock *tp)
 {
 	struct tcp_sack_block *sp = &tp->selective_acks[0];
 	int num_sacks = tp->rx_opt.num_sacks;
 	int this_sack;
-
+*/
 	/* Empty ofo queue, hence, all the SACKs are eaten. Clear. */
 //optiofo
 /*
@@ -4390,7 +4390,7 @@ static void tcp_sack_remove(struct tcp_sock *tp)
                 return;
 	}
 */
-
+/*
 	if(NR_GROSPLIT_CPUS > 0){
 		if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))) {
 			tp->rx_opt.num_sacks = 0;
@@ -4406,14 +4406,11 @@ static void tcp_sack_remove(struct tcp_sock *tp)
 //end
 
 	for (this_sack = 0; this_sack < num_sacks;) {
-		/* Check if the start of the sack is covered by RCV.NXT. */
 		if (!before(tp->rcv_nxt, sp->start_seq)) {
 			int i;
 
-			/* RCV.NXT must cover all the block! */
 			WARN_ON(before(tp->rcv_nxt, sp->end_seq));
 
-			/* Zap this SACK, by moving forward any other SACKS. */
 			for (i = this_sack+1; i < num_sacks; i++)
 				tp->selective_acks[i-1] = tp->selective_acks[i];
 			num_sacks--;
@@ -4424,7 +4421,7 @@ static void tcp_sack_remove(struct tcp_sock *tp)
 	}
 	tp->rx_opt.num_sacks = num_sacks;
 }
-
+*/
 /**
  * tcp_try_coalesce - try to merge skb to prior one
  * @sk: socket
@@ -5001,8 +4998,8 @@ void tcp_data_ready(struct sock *sk)
 static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	bool fragstolen;
-	int eaten;
+//	bool fragstolen;
+//	int eaten;
 	int q1, q2;
 
 	if (sk_is_mptcp(sk))
@@ -5018,18 +5015,55 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	tcp_ecn_accept_cwr(sk, skb);
 
 	tp->rx_opt.dsack = 0;
+//optiofo
+        if(NR_GROSPLIT_CPUS > 0){
+                if(skb->batch_num == 1){
+                        tcp_data_queue_ofo(sk, skb);
+                }else if(skb->batch_num == 2){
+                        tcp_data_queue_ofo_split(sk, skb);
+                }
+        }else{
+                tcp_data_queue_ofo(sk, skb);
+        }
+                if(NR_GROSPLIT_CPUS > 0){
+                        while(1){
+                                q1 = 0;
+                                q2 = 0;
+                                if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                                        q1 = tcp_ofo_queue(sk);
+                                }
+                                if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                                        q2 = tcp_ofo_queue_split(sk);
+                                }
+                                if(q1 || q2){
+                                        continue;
+                                }else{
+                                        break;
+                                }
+                        }
+                                if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+                                        inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                                }
+                }else{
+                        if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                                tcp_ofo_queue(sk);
 
+                                if (RB_EMPTY_ROOT(&tp->out_of_order_queue))
+                                        inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                        }
+                }
+//end
 	/*  Queue data for delivery to the user.
 	 *  Packets in sequence go to the receive queue.
 	 *  Out of sequence packets to the out_of_order_queue.
 	 */
+/*
 	if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
 		if (tcp_receive_window(tp) == 0) {
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPZEROWINDOWDROP);
 			goto out_of_window;
 		}
 
-		/* Ok. In sequence. In window. */
 queue_and_out:
 		if (skb_queue_len(&sk->sk_receive_queue) == 0)
 			sk_forced_mem_schedule(sk, skb->truesize);
@@ -5043,6 +5077,7 @@ queue_and_out:
 			tcp_event_data_recv(sk, skb);
 		if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
 			tcp_fin(sk);
+*/
 //optiofo
 /*
 		if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
@@ -5052,6 +5087,7 @@ queue_and_out:
 				inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 		}
 */
+/*
 		if(NR_GROSPLIT_CPUS > 0){
 			while(1){
 				q1 = 0;
@@ -5095,7 +5131,6 @@ queue_and_out:
 
 	if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
 		tcp_rcv_spurious_retrans(sk, skb);
-		/* A retransmit, 2nd most common case.  Force an immediate ack. */
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
 		tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 
@@ -5107,17 +5142,12 @@ drop:
 		return;
 	}
 
-	/* Out of window. F.e. zero window probe. */
 	if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt + tcp_receive_window(tp)))
 		goto out_of_window;
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
-		/* Partial packet, seq < rcv_next < end_seq */
 		tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, tp->rcv_nxt);
 
-		/* If window is closed, drop tail of packet. But after
-		 * remembering D-SACK for its head made in previous line.
-		 */
 		if (!tcp_receive_window(tp)) {
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPZEROWINDOWDROP);
 			goto out_of_window;
@@ -5136,7 +5166,7 @@ drop:
 	}else{
 		tcp_data_queue_ofo(sk, skb);
 	}
-
+*/
 //end
 }
 
