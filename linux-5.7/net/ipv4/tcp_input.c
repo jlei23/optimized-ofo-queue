@@ -5016,6 +5016,23 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 
 	tp->rx_opt.dsack = 0;
 //optiofo
+	//retransmit
+        if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
+                tcp_rcv_spurious_retrans(sk, skb);
+                NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
+                tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
+
+out_of_window:
+                tcp_enter_quickack_mode(sk, TCP_MAX_QUICKACKS);
+                inet_csk_schedule_ack(sk);
+//drop:
+//                tcp_drop(sk, skb);
+//                return;
+        }
+	//out of window, like zerp window probe
+        if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt + tcp_receive_window(tp)))
+                goto out_of_window;
+
         if(NR_GROSPLIT_CPUS > 0){
                 if(skb->batch_num == 1){
                         tcp_data_queue_ofo(sk, skb);
