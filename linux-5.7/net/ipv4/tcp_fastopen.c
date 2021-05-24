@@ -11,7 +11,7 @@
 #include <net/tcp.h>
 
 //optiofo
-extern int NR_GROSPLIT_CPUS;
+//extern int NR_GROSPLIT_CPUS;
 //end
 
 void tcp_fastopen_init_key_once(struct net *net)
@@ -531,7 +531,7 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct dst_entry *dst;
 //optiofo
-/*
+
         struct sk_buff *skb;
 
         if (!tp->syn_fastopen)
@@ -552,7 +552,7 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
                         atomic_set(&sock_net(sk)->ipv4.tfo_active_disable_times, 0);
                 dst_release(dst);
         }
-*/
+/*
 	if(NR_GROSPLIT_CPUS > 0){
         struct sk_buff *skb1;
         struct sk_buff *skb2;
@@ -604,6 +604,7 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 		dst_release(dst);
 	}
 	}
+*/
 //end
 }
 
