@@ -52,7 +52,7 @@ extern struct percpu_counter tcp_orphan_count;
 void tcp_time_wait(struct sock *sk, int state, int timeo);
 
 //optiofo
-//extern int NR_GROSPLIT_CPUS;
+extern int NR_GROSPLIT_CPUS;
 //end
 
 #define MAX_TCP_HEADER	L1_CACHE_ALIGN(128 + MAX_HEADER)
@@ -693,13 +693,13 @@ static inline void tcp_fast_path_check(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 //optiofo
-
+/*
 	if (RB_EMPTY_ROOT(&tp->out_of_order_queue) &&
 	    tp->rcv_wnd &&
 	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
 	    !tp->urg_data)
 		tcp_fast_path_on(tp);
-/*
+*/
 	if(NR_GROSPLIT_CPUS > 0){
                 if (RB_EMPTY_ROOT(&tp->out_of_order_queue) && RB_EMPTY_ROOT(&tp->out_of_order_queue_split) &&
                     tp->rcv_wnd &&
@@ -715,7 +715,7 @@ static inline void tcp_fast_path_check(struct sock *sk)
 	                tcp_fast_path_on(tp);
 		}
 	}
-*/
+
 //end
 }
 

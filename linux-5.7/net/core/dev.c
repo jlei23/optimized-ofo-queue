@@ -4706,12 +4706,25 @@ static int netif_rx_internal(struct sk_buff *skb)
 
                 pkt_num++;
                 skb->batch_num = 0;
+//waitoptiofo
+		skb->batch_end_flag = 0;
+//end
                 if(pkt_num <= GROSPLIT_BATCH_SIZE){
                         cpu_num = 4;
                         skb->batch_num = 1;
+//waitoptiofo
+			if(pkt_num == GROSPLIT_BATCH_SIZE){
+	                        skb->batch_end_flag = 1;
+			}
+//end
                 }else if(pkt_num > GROSPLIT_BATCH_SIZE && pkt_num <= (2*GROSPLIT_BATCH_SIZE)){
                         cpu_num = 6;
                         skb->batch_num = 2;
+//waitoptiofo
+                        if(pkt_num == (2*GROSPLIT_BATCH_SIZE)){
+                                skb->batch_end_flag = 1;
+                        }
+//end
                 }else{
                         pkt_num = 0;
                 }

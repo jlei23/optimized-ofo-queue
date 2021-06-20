@@ -746,6 +746,8 @@ struct sk_buff {
 	char			cb[48] __aligned(8);
 //optiofo
         __u16                   batch_num;
+//waitoptiofo
+	__u16			batch_end_flag;
 //end
 	union {
 		struct {
