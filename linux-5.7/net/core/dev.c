@@ -167,6 +167,9 @@ struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
 struct list_head ptype_all __read_mostly;	/* Taps */
 static struct list_head offload_base __read_mostly;
 
+//oneofo
+extern void tcp_data_queue(struct sock *sk, struct sk_buff *skb);
+//end
 static int netif_rx_internal(struct sk_buff *skb);
 static int call_netdevice_notifiers_info(unsigned long val,
 					 struct netdev_notifier_info *info);
@@ -4706,25 +4709,21 @@ static int netif_rx_internal(struct sk_buff *skb)
 
                 pkt_num++;
                 skb->batch_num = 0;
-//waitoptiofo
+//oneofo
 		skb->batch_end_flag = 0;
-//end
+		skb->traverse_stack = 0;
                 if(pkt_num <= GROSPLIT_BATCH_SIZE){
                         cpu_num = 4;
                         skb->batch_num = 1;
-//waitoptiofo
 			if(pkt_num == GROSPLIT_BATCH_SIZE){
-	                        skb->batch_end_flag = 1;
+				skb->batch_end_flag = 1;
 			}
-//end
                 }else if(pkt_num > GROSPLIT_BATCH_SIZE && pkt_num <= (2*GROSPLIT_BATCH_SIZE)){
                         cpu_num = 6;
                         skb->batch_num = 2;
-//waitoptiofo
                         if(pkt_num == (2*GROSPLIT_BATCH_SIZE)){
                                 skb->batch_end_flag = 1;
                         }
-//end
                 }else{
                         pkt_num = 0;
                 }
@@ -6197,8 +6196,14 @@ static int process_backlog(struct napi_struct *napi, int quota)
 
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
 //optiofo
+//oneofo
                         if(NR_GROSPLIT_CPUS > 0){
-                                napi_gro_receive(napi, skb);
+				struct sock *sk = skb->sk;
+				if(skb->traverse_stack == 0){
+	                                napi_gro_receive(napi, skb);
+				}else{
+					tcp_data_queue(sk, skb);
+				}
                         }else{
 //end
 				rcu_read_lock();
