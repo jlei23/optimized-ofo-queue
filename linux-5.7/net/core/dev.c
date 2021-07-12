@@ -168,7 +168,8 @@ struct list_head ptype_all __read_mostly;	/* Taps */
 static struct list_head offload_base __read_mostly;
 
 //oneofo
-extern void tcp_data_queue(struct sock *sk, struct sk_buff *skb);
+//extern void tcp_data_queue(struct sock *sk, struct sk_buff *skb);
+//extern int current_processing_batch;
 //end
 static int netif_rx_internal(struct sk_buff *skb);
 static int call_netdevice_notifiers_info(unsigned long val,
@@ -4711,7 +4712,7 @@ static int netif_rx_internal(struct sk_buff *skb)
                 skb->batch_num = 0;
 //oneofo
 		skb->batch_end_flag = 0;
-		skb->traverse_stack = 0;
+//		skb->traverse_stack = 0;
                 if(pkt_num <= GROSPLIT_BATCH_SIZE){
                         cpu_num = 4;
                         skb->batch_num = 1;
@@ -6193,27 +6194,73 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	napi->weight = dev_rx_weight;
 	while (again) {
 		struct sk_buff *skb;
-
-		while ((skb = __skb_dequeue(&sd->process_queue))) {
 //optiofo
 //oneofo
-                        if(NR_GROSPLIT_CPUS > 0){
-				struct sock *sk = skb->sk;
-				if(skb->traverse_stack == 0){
-	                                napi_gro_receive(napi, skb);
-				}else{
-					tcp_data_queue(sk, skb);
-				}
-                        }else{
-//end
+//		struct sock *sk;
+/*
+		while ((skb = __skb_dequeue(&sd->process_queue))) {
 				rcu_read_lock();
 				__netif_receive_skb(skb);
 				rcu_read_unlock();
 				input_queue_head_incr(sd);
 				if (++work >= quota)
 					return work;
-			}
 		}
+*/
+                while ((skb = __skb_dequeue(&sd->process_queue))) {
+			if(NR_GROSPLIT_CPUS > 0) {
+				napi_gro_receive(napi, skb);
+			}else{
+                                rcu_read_lock();
+                                __netif_receive_skb(skb);
+                                rcu_read_unlock();
+                                input_queue_head_incr(sd);
+                                if (++work >= quota)
+                                        return work;
+			}
+                }
+/*
+		if(NR_GROSPLIT_CPUS > 0){
+			if((skb = skb_peek(&sd->process_queue)) != NULL) {
+			if(skb->batch_num == current_processing_batch){
+                                if(skb->traverse_stack == 0){
+                                        napi_gro_receive(napi, skb);
+                                }else{
+					struct sock *sk = skb->sk;
+					__skb_unlink(skb, &sd->process_queue);
+					bh_lock_sock_nested(sk);
+					if(!sock_owned_by_user(sk)){
+	                                        tcp_data_queue(sk, skb);
+					}
+					bh_unlock_sock(sk);
+                                }
+	                        while ((skb = skb_peek_next(skb, &sd->process_queue)) != NULL) {
+	                                if(skb->traverse_stack == 0){
+	                                        napi_gro_receive(napi, skb);
+	                                }else{
+						struct sock *sk = skb->sk;
+						__skb_unlink(skb, &sd->process_queue);
+						bh_lock_sock_nested(sk);
+						if(!sock_owned_by_user(sk)){
+	                                        tcp_data_queue(sk, skb);
+						}
+						bh_unlock_sock(sk);
+	                                }
+	                        }
+			}
+			}
+		}else{
+			while ((skb = __skb_dequeue(&sd->process_queue))) {
+                                rcu_read_lock();
+                                __netif_receive_skb(skb);
+                                rcu_read_unlock();
+                                input_queue_head_incr(sd);
+                                if (++work >= quota)
+                                        return work;
+                        }
+		}
+*/
+//end
 
 		local_irq_disable();
 		rps_lock(sd);

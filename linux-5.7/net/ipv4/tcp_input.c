@@ -4207,7 +4207,7 @@ void tcp_fin(struct sock *sk)
 	 */
 	skb_rbtree_purge(&tp->out_of_order_queue);
 //optiofo
-//        skb_rbtree_purge(&tp->out_of_order_queue_split);
+        skb_rbtree_purge(&tp->out_of_order_queue_split);
 //end
 	if (tcp_is_sack(tp))
 		tcp_sack_reset(&tp->rx_opt);
@@ -4385,13 +4385,13 @@ static void tcp_sack_remove(struct tcp_sock *tp)
 
 	/* Empty ofo queue, hence, all the SACKs are eaten. Clear. */
 //optiofo
-
+/*
 	if (RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 		tp->rx_opt.num_sacks = 0;
                 return;
 	}
+*/
 
-/*
 	if(NR_GROSPLIT_CPUS > 0){
 		if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))) {
 			tp->rx_opt.num_sacks = 0;
@@ -4403,7 +4403,7 @@ static void tcp_sack_remove(struct tcp_sock *tp)
                         return;
                 }
 	}
-*/
+
 //end
 
 	for (this_sack = 0; this_sack < num_sacks;) {
@@ -4564,9 +4564,9 @@ static void tcp_ofo_queue(struct sock *sk)
 }
 
 //optiofo
-/*
-//static void tcp_ofo_queue_split(struct sock *sk)
-static int tcp_ofo_queue_split(struct sock *sk)
+
+static void tcp_ofo_queue_split(struct sock *sk)
+//static int tcp_ofo_queue_split(struct sock *sk)
 {
         struct tcp_sock *tp = tcp_sk(sk);
         __u32 dsack_high = tp->rcv_nxt;
@@ -4575,7 +4575,7 @@ static int tcp_ofo_queue_split(struct sock *sk)
         struct rb_node *p;
 
 //optiofo
-	int ret = 0;
+//	int ret = 0;
 //        printk("de 2 cpu: %d\n", smp_processor_id());
 //end
 
@@ -4599,7 +4599,7 @@ static int tcp_ofo_queue_split(struct sock *sk)
                         continue;
                 }
 //optiofo
-		ret++;
+//		ret++;
 //end
                 tail = skb_peek_tail(&sk->sk_receive_queue);
                 eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
@@ -4616,15 +4616,15 @@ static int tcp_ofo_queue_split(struct sock *sk)
                 }
         }
 //optiofo
-	return ret;
+//	return ret;
 //end
 }
-*/
+
 //end
 
 static bool tcp_prune_ofo_queue(struct sock *sk);
 //optiofo
-//static bool tcp_prune_ofo_queue_split(struct sock *sk);
+static bool tcp_prune_ofo_queue_split(struct sock *sk);
 //endd
 static int tcp_prune_queue(struct sock *sk);
 
@@ -4639,10 +4639,10 @@ static int tcp_try_rmem_schedule(struct sock *sk, struct sk_buff *skb,
 
 		while (!sk_rmem_schedule(sk, skb, size)) {
 //optiofo
-
+/*
 			if (!tcp_prune_ofo_queue(sk))
 				return -1;
-/*
+*/
 			if(NR_GROSPLIT_CPUS > 0){
                         	if ((!tcp_prune_ofo_queue(sk)) && (!tcp_prune_ofo_queue_split(sk))){
                                 	return -1;
@@ -4652,7 +4652,7 @@ static int tcp_try_rmem_schedule(struct sock *sk, struct sk_buff *skb,
 	                                return -1;
 				}
 			}
-*/
+
 //end
 		}
 	}
@@ -4799,7 +4799,7 @@ end:
 }
 
 //optiofo
-/*
+
 static void tcp_data_queue_ofo_split(struct sock *sk, struct sk_buff *skb)
 {
         struct tcp_sock *tp = tcp_sk(sk);
@@ -4923,7 +4923,7 @@ end:
                 skb_set_owner_r(skb, sk);
         }
 }
-*/
+
 //end
 
 static int __must_check tcp_queue_rcv(struct sock *sk, struct sk_buff *skb,
@@ -5007,8 +5007,10 @@ void tcp_data_ready(struct sock *sk)
 	sk->sk_data_ready(sk);
 }
 
+//optiofo
 //oneofo
-int current_processing_batch = 0;
+/*
+int current_processing_batch = 1;
 static void flip_current_processing_batch(struct sk_buff *skb)
 {
 	if(skb->batch_num == 1){
@@ -5016,12 +5018,13 @@ static void flip_current_processing_batch(struct sk_buff *skb)
         }else if(skb->batch_num == 2){
                 current_processing_batch = 1;
         }
- }
+}
+*/
 //end
 
 //oneofo
-void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
-//static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
+//void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
+static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	bool fragstolen;
@@ -5033,6 +5036,7 @@ void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 //	printk("tcp_data_queue cpu: %d\n", smp_processor_id());
 //end
 //oneofo
+/*
 	if(NR_GROSPLIT_CPUS > 0){
 		skb->traverse_stack = 1;
 		if(skb->batch_num != current_processing_batch){
@@ -5042,8 +5046,19 @@ void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 			flip_current_processing_batch(skb);
 		}
 	}
+*/
 //end
-
+                if(NR_GROSPLIT_CPUS > 0) {
+                        if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                                tcp_ofo_queue(sk);
+                        }
+                        if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                                tcp_ofo_queue_split(sk);
+                        }
+                        if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+                                inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                        }
+		}
 	if (sk_is_mptcp(sk))
 		mptcp_incoming_options(sk, skb, &tp->rx_opt);
 
@@ -5084,16 +5099,28 @@ queue_and_out:
 			tcp_fin(sk);
 
 //optiofo
-
+/*
 		if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 			tcp_ofo_queue(sk);
 
                         if (RB_EMPTY_ROOT(&tp->out_of_order_queue))
 				inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 		}
+*/
 
+		if(NR_GROSPLIT_CPUS > 0) {
 /*
-		if(NR_GROSPLIT_CPUS > 0){
+			if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+				tcp_ofo_queue(sk);
+			}
+			if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+				tcp_ofo_queue_split(sk);
+			}
+                        if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+				inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+			}
+*/
+/*
 			while(1){
 				q1 = 0;
 				q2 = 0;
@@ -5112,6 +5139,7 @@ queue_and_out:
                 		if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
                 	        	inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
                 		}
+*/
 		}else{
 			if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 				tcp_ofo_queue(sk);
@@ -5120,7 +5148,7 @@ queue_and_out:
 					inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
 			}
 		}
-*/
+
 //end
 		if (tp->rx_opt.num_sacks)
 			tcp_sack_remove(tp);
@@ -5160,8 +5188,8 @@ drop:
 		goto queue_and_out;
 	}
 //optiofo
-	tcp_data_queue_ofo(sk, skb);
-/*
+//	tcp_data_queue_ofo(sk, skb);
+
 	if(NR_GROSPLIT_CPUS > 0){
         	if(skb->batch_num == 1){
                 	tcp_data_queue_ofo(sk, skb);
@@ -5171,7 +5199,7 @@ drop:
 	}else{
 		tcp_data_queue_ofo(sk, skb);
 	}
-*/
+
 //end
 }
 
@@ -5331,7 +5359,7 @@ end:
 }
 
 //optiofo
-/*
+
 static void tcp_collapse_ofo_queue_split(struct sock *sk)
 {
         struct tcp_sock *tp = tcp_sk(sk);
@@ -5374,7 +5402,7 @@ new_range:
                         end = TCP_SKB_CB(skb)->end_seq;
         }
 }
-*/
+
 //end
 
 /* Collapse ofo queue. Algorithm: select contiguous sequence of skbs
@@ -5428,7 +5456,7 @@ new_range:
 }
 
 //optiofo
-/*
+
 static bool tcp_prune_ofo_queue_split(struct sock *sk)
 {
         struct tcp_sock *tp = tcp_sk(sk);
@@ -5461,7 +5489,7 @@ static bool tcp_prune_ofo_queue_split(struct sock *sk)
                 tcp_sack_reset(&tp->rx_opt);
         return true;
 }
-*/
+
 //end
 
 /*
@@ -5536,11 +5564,11 @@ static int tcp_prune_queue(struct sock *sk)
 
 	tcp_collapse_ofo_queue(sk);
 //optiofo
-/*
+
 	if(NR_GROSPLIT_CPUS > 0){
 		tcp_collapse_ofo_queue_split(sk);
 	}
-*/
+
 //end
 
 	if (!skb_queue_empty(&sk->sk_receive_queue))
@@ -5558,11 +5586,11 @@ static int tcp_prune_queue(struct sock *sk)
 
 	tcp_prune_ofo_queue(sk);
 //optiofo
-/*
+
 	if(NR_GROSPLIT_CPUS > 0){
 		tcp_prune_ofo_queue_split(sk);
 	}
-*/
+
 //end
 	if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf)
 		return 0;
@@ -5668,13 +5696,13 @@ send_now:
 		return;
 	}
 //optiofo
-
+/*
 	if (!ofo_possible || RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
 		tcp_send_delayed_ack(sk);
                 return;
 	}
+*/
 
-/*
 	if(NR_GROSPLIT_CPUS > 0){
 		if (!ofo_possible || (RB_EMPTY_ROOT(&tp->out_of_order_queue) && RB_EMPTY_ROOT(&tp->out_of_order_queue_split))) {
 			tcp_send_delayed_ack(sk);
@@ -5686,7 +5714,7 @@ send_now:
                         return;
                 }
 	}
-*/
+
 //end
 	if (!tcp_is_sack(tp) ||
 	    tp->compressed_ack >= sock_net(sk)->ipv4.sysctl_tcp_comp_sack_nr)

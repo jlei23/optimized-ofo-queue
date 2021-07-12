@@ -748,7 +748,7 @@ struct sk_buff {
         __u16                   batch_num;
 //oneofo
 	__u16			batch_end_flag;
-	__u16			traverse_stack;
+//	__u16			traverse_stack;
 //end
 	union {
 		struct {

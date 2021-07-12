@@ -413,7 +413,7 @@ void tcp_init_sock(struct sock *sk)
 
 	tp->out_of_order_queue = RB_ROOT;
 //optiofo
-//        tp->out_of_order_queue_split = RB_ROOT;
+        tp->out_of_order_queue_split = RB_ROOT;
 //end
 	sk->tcp_rtx_queue = RB_ROOT;
 	tcp_init_xmit_timers(sk);
@@ -2613,7 +2613,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tcp_fastopen_active_disable_ofo_check(sk);
 	skb_rbtree_purge(&tp->out_of_order_queue);
 //optiofo
-//        skb_rbtree_purge(&tp->out_of_order_queue_split);
+        skb_rbtree_purge(&tp->out_of_order_queue_split);
 //end
 	inet->inet_dport = 0;
 
