@@ -4504,8 +4504,8 @@ static void tcp_drop(struct sock *sk, struct sk_buff *skb)
  * out_of_order queue into the receive_queue.
  */
 //optiofo
-static void tcp_ofo_queue(struct sock *sk)
-//static int tcp_ofo_queue(struct sock *sk)
+//static void tcp_ofo_queue(struct sock *sk)
+static int tcp_ofo_queue(struct sock *sk)
 //end
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -4515,7 +4515,7 @@ static void tcp_ofo_queue(struct sock *sk)
 	struct rb_node *p;
 
 //optiofo
-//	int ret = 0;
+	int ret = 0;
 //        printk(" de 1 cpu: %d\n", smp_processor_id());
 //end
 
@@ -4540,6 +4540,7 @@ static void tcp_ofo_queue(struct sock *sk)
 		}
 //optiofo
 //		ret++;
+		ret = 1;
 //end
 		tail = skb_peek_tail(&sk->sk_receive_queue);
 		eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
@@ -4559,14 +4560,14 @@ static void tcp_ofo_queue(struct sock *sk)
 		}
 	}
 //optiofo
-//	return ret;
+	return ret;
 //end
 }
 
 //optiofo
 
-static void tcp_ofo_queue_split(struct sock *sk)
-//static int tcp_ofo_queue_split(struct sock *sk)
+//static void tcp_ofo_queue_split(struct sock *sk)
+static int tcp_ofo_queue_split(struct sock *sk)
 {
         struct tcp_sock *tp = tcp_sk(sk);
         __u32 dsack_high = tp->rcv_nxt;
@@ -4575,7 +4576,7 @@ static void tcp_ofo_queue_split(struct sock *sk)
         struct rb_node *p;
 
 //optiofo
-//	int ret = 0;
+	int ret = 0;
 //        printk("de 2 cpu: %d\n", smp_processor_id());
 //end
 
@@ -4600,6 +4601,7 @@ static void tcp_ofo_queue_split(struct sock *sk)
                 }
 //optiofo
 //		ret++;
+		ret = 1;
 //end
                 tail = skb_peek_tail(&sk->sk_receive_queue);
                 eaten = tail && tcp_try_coalesce(sk, tail, skb, &fragstolen);
@@ -4616,7 +4618,7 @@ static void tcp_ofo_queue_split(struct sock *sk)
                 }
         }
 //optiofo
-//	return ret;
+	return ret;
 //end
 }
 
@@ -5030,7 +5032,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	bool fragstolen;
 	int eaten;
 //optiofo
-//	int q1, q2;
+	int q1, q2;
 //end
 //optiofo
 //	printk("tcp_data_queue cpu: %d\n", smp_processor_id());
@@ -5049,6 +5051,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 */
 //end
                 if(NR_GROSPLIT_CPUS > 0) {
+/*
                         if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
                                 tcp_ofo_queue(sk);
                         }
@@ -5058,6 +5061,26 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
                         if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
                                 inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
                         }
+*/
+
+                        while(1){
+                                q1 = 0;
+                                q2 = 0;
+                                if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+                                        q1 = tcp_ofo_queue(sk);
+                                }
+                                if (!RB_EMPTY_ROOT(&tp->out_of_order_queue_split)) {
+                                        q2 = tcp_ofo_queue_split(sk);
+                                }
+                                if(q1 || q2){
+                                        continue;
+                                }else{
+                                        break;
+                                }
+                        }
+                                if ((RB_EMPTY_ROOT(&tp->out_of_order_queue)) && (RB_EMPTY_ROOT(&tp->out_of_order_queue_split))){
+                                        inet_csk(sk)->icsk_ack.pending |= ICSK_ACK_NOW;
+                                }
 		}
 	if (sk_is_mptcp(sk))
 		mptcp_incoming_options(sk, skb, &tp->rx_opt);
